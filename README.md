@@ -3,123 +3,99 @@
 > or hold explicit written authorization to assess**. Unauthorized use is
 > prohibited and may be illegal. Read [ETHICS.md](ETHICS.md) and
 > [SCOPE.md](SCOPE.md) before use. Use at your own risk; **AS IS**, no warranty.
+
 # N3 — DNS Spoof
 
-Pure-stdlib DNS engine, spoof-decider, and cache-poison logic. All core logic
-runs unprivileged and deterministically; live reply injection is gated behind
-`--live`/`--iface`.
+**DNS spoofing toolkit** by **5h4d0wn1k** for **educational cache-poisoning
+and response-forgery study**: a pure-standard-library DNS wire-format engine
+(query build, spoofed-reply build, name codec with compression-pointer
+decode), a query-ID-strict spoof decider, deterministic offline harness and a
+`--live` sniff-and-spoof mode gated behind root + scapy.
 
-## Overview
+## Why study DNS spoofing
 
-This project implements a DNS spoofing engine that:
-- Builds and parses genuine DNS wire-format messages by hand (stdlib `struct`)
-- Spoofs responses only for a target domain, using the **matching query ID**
-- Rejects mismatched-ID responses (cache-poison resistance, false-positive guard)
-- Supports A and AAAA answers
+DNS is the trust root of the internet — and the classic demonstration of why
+query IDs and 0x20 randomization exist. This engine builds and parses DNS
+wire messages by hand (`struct`-level), proves that a matching query ID opens
+the door to response forgery, and equally proves that **mismatched-ID
+responses are rejected** — the same guard that makes modern cache poisoning
+hard. That dual lesson is the point: students see both the attack and the
+defense in the same code path. All core logic runs unprivileged and fully
+deterministic; live reply injection requires `--live`/`--iface`, root
+privileges and scapy, and must stay inside an authorized lab. See
+[ETHICS.md](ETHICS.md) and [SCOPE.md](SCOPE.md).
 
-## What Works
+## Features
 
-- **DNS message engine** (`DNSMessage.build_query` / `build_spoofed_reply` /
-  `parse` / name codec with compression-pointer decode) — round-trips through
-  the real parser, no privileges.
-- **Spoof decider** (`DNSSpoofDecider`) — `verify_response` accepts only the
-  exact query-ID match and answers the target domain; `should_send_spoof`
-  generates a spoof reply for a fresh query.
-- **Offline harness** (`--harness`) — deterministic PASS path: matching-ID
-  reply accepted, spoof generated, mismatched-ID reply rejected.
-- **Live sniff-and-spoof** (`--live/--iface`) — root + optional scapy; builds
-  the spoof from the same engine used offline.
+- **DNS wire-format engine** — `build_query`, `build_spoofed_reply`, `parse`
+  and a name codec with compression-pointer decode (`DNSMessage`).
+- **Spoof decider** — `should_send_spoof` generates a reply for a fresh
+  query; `verify_response` accepts only exact query-ID matches (`DNSSpoofDecider`).
+- **Cache-poison resistance** — mismatched-ID responses are rejected, the
+  false-positive guard taught in every defenses course.
+- **A and AAAA answers** — spoof both address record types.
+- **Deterministic offline harness** — `--harness` runs the full PASS path
+  with no privileges and RFC 5737 documentation addresses.
+- **Live sniff-and-spoof** — `--live --iface` uses the same engine for real
+  interface injection (root + scapy, authorized-lab only).
 
-## Installation
+## Quickstart
 
-No external dependencies for the core. Optional for live mode:
+Prerequisites: the core needs only the Python standard library. Live mode
+additionally needs `pip install scapy` and root on a lab interface.
 
 ```bash
-pip install scapy
-```
-
-## Usage
-
-```bash
-# Offline decider harness (no privileges, deterministic)
-python3 dns_spoof.py --harness
+# Offline decider harness (no privileges, deterministic, exit 0)
+python3 firmware/dns_spoof.py --harness
 
 # Custom target / spoof IP (documentation ranges only)
-python3 dns_spoof.py --harness --domain lab-demo.test --ip 192.0.2.53
+python3 firmware/dns_spoof.py --harness --domain lab-demo.test --ip 192.0.2.53
 
-# Live sniff-and-spoof on a real interface (root + scapy)
-sudo python3 dns_spoof.py --live --iface eth0 --domain example-lab.test --ip 192.0.2.200
-```
+# Live sniff-and-spoof on a real interface (root + scapy, authorized lab only)
+sudo python3 firmware/dns_spoof.py --live --iface eth0 --domain example-lab.test --ip 192.0.2.200
 
-## Tests
-
-```bash
+# Run the test suite (12 deterministic offline tests)
 python3 -m unittest discover -s tests
 ```
 
-## Live Lab Test Plan
+## CLI
 
-> Authorized own-lab use only. Use documented placeholders (192.0.2.x, lab-* names).
+```
+python3 firmware/dns_spoof.py [-h] [-d DOMAIN] [-i IFACE] [--ip IP]
+                              [--harness] [--live] [--timeout SEC]
+```
 
-1. **Prepare a controlled lab**: client host sends queries to a resolver you
-   control; attacker host runs the tool.
-2. Run `sudo python3 dns_spoof.py --live --iface <lab-iface> --domain lab-a.test --ip 192.0.2.200`.
-3. From the client, resolve `lab-a.test` with `dig lab-a.test @<resolver>` and
-   confirm the answer is `192.0.2.200`.
-4. Confirm non-target domains (`other.test`) are untouched (engine checks the
-   domain before sending a spoof).
-5. Confirm the query-ID matching: a response whose ID does not match the
-   client's query is rejected by the decider (cache-poison resistance).
+- `-d, --domain` — target domain to spoof (default `example-lab.test`).
+- `-i, --iface` — network interface for live mode (default `eth0`).
+- `--ip` — spoofed answer address (default `192.0.2.200`).
+- `--harness` — run the deterministic offline decider harness.
+- `--live` — live sniff-and-spoof (requires root + scapy + authorization).
+- `--timeout` — sniff timeout for live mode.
 
-## Metrics
+Exit codes: `0` on successful harness, `1` on failure.
 
-Core offline harness is deterministic and unit-tested:
+## Project structure
 
-- DNS name codec round-trip incl. compression pointer: PASS (4 tests)
-- Query/reply build + parse round-trip: PASS (3 tests)
-- Matching query-ID response accepted: PASS
-- Mismatched query-ID response rejected: PASS (cache-poison guard)
-- Target-domain vs non-target-domain spoof decision: PASS (5 decider tests)
-- Exit code: `0` on successful harness, `1` on failure
+```
+firmware/dns_spoof.py   # DNS message engine, decider, harness, live mode
+tests/test_dns_spoof.py # unittest coverage: codec, round-trip, decider
+```
 
-## Legal Disclaimer
+## Documentation
 
-**IMPORTANT: Read before use.**
+- [ETHICS.md](ETHICS.md) — acceptable and prohibited use.
+- [SCOPE.md](SCOPE.md) — authorized target scope.
+- [SECURITY.md](SECURITY.md) — responsible disclosure.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guide.
 
-This project is provided for **educational and authorized security testing purposes only**.
+## Contributing
 
-### Authorization Requirements
-- You MUST have explicit written permission from the network owner before using this tool
-- Unauthorized interception of network communications is illegal under federal and state laws
-- This tool should ONLY be used on networks you own or have written authorization to test
-
-### Legal Framework
-- **Computer Fraud and Abuse Act (CFAA)**: Unauthorized access to computer systems is a federal crime
-- **Wiretap Act (18 U.S.C. § 2511)**: Interception of electronic communications without consent is illegal
-- **State Laws**: Many states have additional computer crime and wiretapping statutes
-- **GDPR/CCPA**: Data collection may be subject to privacy regulations
-
-### Acceptable Use
-- Testing security of your own networks
-- Authorized penetration testing with written scope
-- Academic research in controlled lab environments
-- Security education and training
-
-### Prohibited Use
-- Intercepting communications on networks you do not own
-- Attacking infrastructure without authorization
-- Any activity that violates applicable laws or regulations
-- Commercial use without proper licensing
-
-### No Warranty
-This software is provided "AS IS" without warranty of any kind. The author is not responsible for any misuse or damage caused by this software.
-
-### Responsible Disclosure
-If you discover vulnerabilities using this tool, follow responsible disclosure practices:
-1. Report to the vendor/owner privately
-2. Allow reasonable time for remediation
-3. Do not exploit beyond proof of concept
+New query-ID defenses, additional RR-types and harness cases are welcome. Open
+an issue or PR against the default branch; keep contributions scoped to
+educational and authorization-respecting tooling.
 
 ## License
 
-MIT
+MIT — full legal shield in [LICENSE](LICENSE). Educational, authorization-
+required software for studying DNS hijacking on networks you own or are
+explicitly permitted to test.
