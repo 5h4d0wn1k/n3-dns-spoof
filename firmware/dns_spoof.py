@@ -16,7 +16,7 @@ import sys
 import time
 
 try:
-    from scapy.all import Ether, IP, UDP, DNS, DNSQR, DNSRR, sendp  # type: ignore
+    from scapy.all import Ether, IP, UDP, DNS, DNSQR, DNSRR, sendp, sniff  # type: ignore
     _SCAPY = True
 except ImportError:
     _SCAPY = False
